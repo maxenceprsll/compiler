@@ -1,0 +1,141 @@
+%{
+	
+	#include "y.tab.h"
+	#include "functions.h"
+
+    int tableau1[MAX_SYMBOLS][5];
+	char tableau2[CHARTAB_LENGTH];
+	int last_index;
+
+	extern YYSTYPE yylval;
+
+	char* extract(int cell_index){
+		int index = tableau1[cell_index][1];
+		int length = tableau1[cell_index][2];
+		char* result = (char*)malloc((length + 1) * sizeof(char));
+		for (int i = 0; i < length; i++) {
+			result[i] = tableau2[index + i];
+		}
+		result[length] = '\0';
+		return result;
+	}
+	
+	int cell_exists(char* cell_name) {
+		for (int i = 0; i < last_index; i++) {
+			if (strcmp(extract(i), cell_name) == 0) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	int add_symbol(char *value, int type) {
+		int length = strlen(value);
+		if ((strlen(tableau2) + length) < 1000 && last_index < MAX_SYMBOLS) {
+			tableau1[last_index][0] = type;
+			tableau1[last_index][1] = strlen(tableau2);
+			tableau1[last_index][2] = length;
+			strcpy(&tableau2[strlen(tableau2)], value);
+			last_index++;
+			return last_index - 1;
+		}
+		yyerror("Erreur Mémoire : Nombre maximal de cellules atteint.\n");
+		return -1;
+	}
+
+%}
+
+ref_cellule		[a-zA-Z]{1,2}([1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|250)
+nombre			[0-9]+(","[0-9]+)?
+chaine			\"[^"]+\"
+
+%START LEFT MIDDLE RIGHT
+
+%%
+
+
+^{ref_cellule} {
+    printf("Nom de cellule : %s\n", yytext);
+	BEGIN MIDDLE;
+	if (cell_exists(yytext) != -1) {
+		yyerror("Erreur sémentique : la cellule a déjà été déclarée");
+	} else {
+		yylval = add_symbol(yytext,'c');
+	}
+    return CELLULE;
+}
+
+<LEFT>{ref_cellule} {
+    printf("Nom de cellule : %s\n", yytext);
+	BEGIN MIDDLE;
+	if (cell_exists(yytext) != -1) {
+		yyerror("Erreur sémentique : la cellule a déjà été déclarée");
+	} else {
+		yylval = add_symbol(yytext,'c');
+	}
+    return CELLULE;
+}
+
+<RIGHT>{ref_cellule} {
+    printf("Nom de cellule : %s\n", yytext);
+	if (cell_exists(yytext) == -1) {
+		yyerror("Erreur sémentique : la cellule doit êter déclarée avant d'être appelée");
+	} else {
+		yylval = cell_exists(yytext);
+	}
+    return CELLULE;
+}
+
+<RIGHT>{nombre} {
+    printf("Nombre : %s\n", yytext);
+	yylval = add_symbol(yytext,'n');
+    return NOMBRE;
+}
+
+<RIGHT>{chaine} {
+    printf("Chaîne de caractères : %s\n", yytext);
+    yylval = add_symbol(yytext,'s');
+    return CHAINE;
+}
+
+<MIDDLE>">>" {
+	printf("Opérateur d'affectation\n");
+	BEGIN RIGHT;
+	return OPAFF;
+}
+
+<RIGHT>"&"			{printf("Opérateur de concaténation\n");return CONCAT;}
+<RIGHT>"+"			{printf("Opérateur d'addition\n");return PLUS;}
+<RIGHT>"-"			{printf("Opérateur de soustraction\n");return MOINS;}
+<RIGHT>"*"			{printf("Opérateur de multiplication\n");return MULT;}
+<RIGHT>"/"			{printf("Opérateur de division\n");return DIVIS;}
+<RIGHT>"^"			{printf("Opérateur de puissance\n");return PUISS;}
+
+<RIGHT>[sS][oO][mM][mM][eE]	{
+	printf("Fonction somme\n"); 
+	return SOMME;
+}
+
+<RIGHT>[mM][oO][yY][eE][nN][nN][eE]	{
+	return MOYENNE;
+}
+
+<RIGHT>[mM][iI][nN]		{
+	printf("Fonction min\n"); 
+	return MIN;
+}
+
+<RIGHT>[mM][aA][xX]		{
+	printf("Fonction max\n");   
+	return MAX;
+}
+
+<RIGHT>\(			{printf("Parenthèse ouvrante\n"); return PO;}
+<RIGHT>\)			{printf("Parenthèse fermante\n"); return PF;}
+<RIGHT>\:			{printf("Deux-points\n"); return DXPTS;}
+<RIGHT>\;			{printf("Point-virgule\n"); return PV;}
+
+<RIGHT>(\n|\r\n)+ 	{ printf("Retour à la ligne\n"); BEGIN LEFT; return NL;}
+
+.					{printf("  Erreur lexicale : Caractère %s non reconnu\n",yytext);}
+

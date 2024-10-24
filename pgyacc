@@ -1,0 +1,353 @@
+%{
+
+#include "functions.h"
+
+extern int tableau1[100][5];
+extern char tableau2[1000];
+extern int last_index;
+
+void link_to_cell(int cell_index, int type, int content_index) {
+    tableau1[cell_index][3] = type;
+    tableau1[cell_index][4] = content_index;
+}
+
+int can_operate(int index) {
+    return tableau1[index][0]=='c'?tableau1[index][3]:tableau1[index][0]=='n';
+}
+
+int is_number(int index) {
+    return tableau1[index][0]=='n';
+}
+
+int get_type(int index) {
+    if (tableau1[index][0] == 'n') {
+        return 1;
+    } else if (tableau1[index][0] == 's') {
+        return 2;
+    } else if (tableau1[index][0] == 'c' ) {
+        return tableau1[index][3];
+    } else {
+        return 0;
+    }
+}
+
+void cell_to_coords(const char *cell_name, int *row, int *col) {
+    char letters[3];
+    char numbers[4];
+    
+    sscanf(cell_name, "%2[A-Za-z]%3[0-9]", letters, numbers);
+    
+    *row = atoi(numbers);
+    *col = 0;
+    
+    for (char *c = letters; *c >= 'A' && *c <= 'Z'; ++c) {
+        *col = *col * 26 + (*c - 'A' + 1);
+    }
+}
+
+void get_csv_dimensions(int* max_row, int* max_col) {
+    *max_row = 0;
+    *max_col = 0;
+    for (int i = 0; i < last_index; i++) {
+        if (tableau1[i][0] == 'c') {
+            char* cell_name = extract(i);
+            int row, col;
+
+            cell_to_coords(cell_name, &row, &col);
+            
+            if (row > *max_row) {
+                *max_row = row;
+            }
+            if (col > *max_col) {
+                *max_col = col;
+            }
+            free(cell_name);
+        }
+    }
+}
+
+int find_cell_index_by_coords(int col, int row) {
+    for (int i = 0; i < last_index; i++) {
+        if (tableau1[i][0] == 'c') {
+            char* cell_name = extract(i);
+            int cell_col, cell_row;
+            cell_to_coords(cell_name, &cell_col, &cell_row);
+            free(cell_name);
+            
+            if (cell_col == col && cell_row == row) {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+
+void save_to_csv(int rows, int columns) {
+    FILE *csv_file = fopen("data.csv", "w");
+    if (csv_file == NULL) {
+        printf("Erreur lors de l'ouverture du fichier CSV.\n");
+        return;
+    }
+        for (int row = 1; row <= rows; row++) {
+        for (int col = 1; col <= columns; col++) {
+            int cell_index = find_cell_index_by_coords(row, col);
+            if (cell_index != -1) {
+                char* cell_content = extract(tableau1[cell_index][4]);
+                fprintf(csv_file, "%s", cell_content);
+                free(cell_content);
+            } else {
+                fprintf(csv_file, " ");
+            }
+            if (col < columns) {
+                fprintf(csv_file, ";");
+            }
+        }
+        fprintf(csv_file, "\n");
+    }
+
+    fclose(csv_file);
+}
+
+%}
+
+
+%token NL OPAFF PO PF NOMBRE CHAINE CELLULE
+%token PLUS MOINS MULT DIVIS PUISS CONCAT
+%token SOMME MOYENNE MIN MAX DXPTS PV
+
+%left PLUS MOINS
+%left MULT DIVIS PUISS
+%left SOMME MOYENNE MIN MAX
+%left PO PF
+
+%start fichier
+
+%%
+
+fichier : instruction 
+        | instruction NL 
+        | instruction NL fichier ;
+
+instruction : CELLULE OPAFF contenu { 
+            printf("Affectation à l'index %d\n", $3);
+            if($1 == -1) {
+                printf("Erreur : Cellule non définie\n");
+            } else {
+                int type_of_contenu = get_type($3);
+                printf("Type du contenu : %s\n", type_of_contenu==1?"nombre":(type_of_contenu==2?"chaine":"autre"));
+                link_to_cell($1, type_of_contenu, $3);
+            }
+		};
+
+contenu : contenu CONCAT suite1 {
+            char* left;
+            if (tableau1[$1][0]=='c') {
+                left = extract(tableau1[$1][4]);
+                if (left[0] == '"' && left[strlen(left) - 1] == '"') {
+                    left[strlen(left) - 1] = '\0';
+                    left++;
+                }
+            } else {
+                left = extract($1);
+                if (left[0] == '"' && left[strlen(left) - 1] == '"') {
+                    left[strlen(left) - 1] = '\0';
+                    left++;
+                }
+            }
+            char* right;
+            if (tableau1[$3][0]=='c') {
+                right = extract(tableau1[$3][4]);
+                if (right[0] == '"' && right[strlen(right) - 1] == '"') {
+                    right[strlen(right) - 1] = '\0';
+                    right++;
+                }
+            } else {
+                right = extract($3);
+                if (right[0] == '"' && right[strlen(right) - 1] == '"') {
+                    right[strlen(right) - 1] = '\0';
+                    right++;
+                }
+            }
+            char* concat = malloc(strlen(left) + strlen(right) + 1);
+            sprintf(concat, "\"%s%s\"", left, right);
+            $$ = add_symbol(concat, 's');
+            free(concat);
+        }
+        | suite1 ;
+
+suite1 : suite1 PLUS suite2 {
+            if (can_operate($1) && can_operate($3)) {
+                int left_int = atoi(is_number($1) ? extract($1) : extract(tableau1[$1][4]));
+                int right_int = atoi(is_number($3) ? extract($3) : extract(tableau1[$3][4]));
+                char resultat[30];
+                sprintf(resultat, "%d", left_int + right_int);
+				printf("Addition de %d et %d = %s\n", left_int, right_int, resultat);
+                $$ = add_symbol(resultat, 'n');
+            } else {
+                printf("Les opérandes ne sont pas des nombres\n");
+                $$ = add_symbol("non-number", 's');
+            }
+        }
+        | suite1 MOINS suite2 {
+            if (can_operate($1) && can_operate($3)) {
+                int left_int = atoi(is_number($1) ? extract($1) : extract(tableau1[$1][4]));
+                int right_int = atoi(is_number($3) ? extract($3) : extract(tableau1[$3][4]));
+                char resultat[30];
+                sprintf(resultat, "%d", left_int - right_int);
+				printf("Soustraction de %d et %d = %s\n", left_int, right_int, resultat);
+                $$ = add_symbol(resultat, 'n');
+            } else {
+                printf("Les opérandes ne sont pas des nombres\n");
+                $$ = add_symbol("non-number", 's');
+            }
+        }
+        | suite2 ;
+
+suite2 : suite2 MULT suite3 {
+            if (can_operate($1) && can_operate($3)) {
+                int left_int = atoi(is_number($1) ? extract($1) : extract(tableau1[$1][4]));
+                int right_int = atoi(is_number($3) ? extract($3) : extract(tableau1[$3][4]));
+                char resultat[30];
+                sprintf(resultat, "%d", left_int * right_int);
+				printf("Multiplication de %d et %d = %s\n", left_int, right_int, resultat);
+                $$ = add_symbol(resultat, 'n');
+            } else {
+                printf("Les opérandes ne sont pas des nombres\n");
+                $$ = add_symbol("non-number", 's');
+            }
+        }
+        | suite2 DIVIS suite3 {
+            if (can_operate($1) && can_operate($3)) {
+                int left_int = atoi(is_number($1) ? extract($1) : extract(tableau1[$1][4]));
+                int right_int = atoi(is_number($3) ? extract($3) : extract(tableau1[$3][4]));
+                char resultat[30];
+                sprintf(resultat, "%d", left_int / right_int);
+				printf("Division de %d et %d = %s\n", left_int, right_int, resultat);
+                $$ = add_symbol(resultat, 'n');
+            } else {
+                printf("Les opérandes ne sont pas des nombres\n");
+                $$ = add_symbol("non-number", 's');
+            }
+        }
+        | suite3 ;
+
+suite3 : suite3 PUISS suite4 {
+            if (can_operate($1) && can_operate($3)) {
+                int left_int = atoi(is_number($1) ? extract($1) : extract(tableau1[$1][4]));
+                int right_int = atoi(is_number($3) ? extract($3) : extract(tableau1[$3][4]));
+                char resultat[30];
+                sprintf(resultat, "%f", pow(left_int, right_int));
+				printf("Puissance de %d et %d = %s\n", left_int, right_int, resultat);
+                $$ = add_symbol(resultat, 'n');
+            } else {
+                printf("Les opérandes ne sont pas des nombres\n");
+                $$ = add_symbol("non-number", 's');
+            }
+        }
+        | suite4 ;
+
+suite4 : PO contenu PF {$$ = $2;}
+        | NOMBRE
+        | CELLULE 
+        | CHAINE
+        | fonction ;
+
+fonction : SOMME arguments {
+            char* args = malloc(strlen(extract($2)) + 7);
+            sprintf(args, "SOMME%s", extract($2));
+            printf("Function SOMME with arguments: %s\n", args);
+            $$ = add_symbol(args, 's');
+            free(args);
+        }
+        | MOYENNE arguments {
+            char* args = malloc(strlen(extract($2)) + 9);
+            sprintf(args, "MOYENNE%s", extract($2));
+            printf("Function MOYENNE with arguments: %s\n", args);
+            $$ = add_symbol(args, 's');
+            free(args);
+        }
+        | MIN arguments {
+            char* args = malloc(strlen(extract($2)) + 5);
+            sprintf(args, "MIN%s", extract($2));
+            printf("Function MIN with arguments: %s\n", args);
+            $$ = add_symbol(args, 's');
+            free(args);
+        }
+        | MAX arguments {
+            char* args = malloc(strlen(extract($2)) + 5);
+            sprintf(args, "MAX%s", extract($2));
+            printf("Function MAX with arguments: %s\n", args);
+            $$ = add_symbol(args, 's');
+            free(args);
+        };
+
+arguments : PO plage PF {
+            char* args = malloc(strlen(extract($2)) + 3); 
+            sprintf(args, "(%s)", extract($2)); 
+            printf("Arguments with plage: %s\n", args);
+            $$ = add_symbol(args, 's');
+            free(args);
+        }
+        | PO liste PF { 
+            char* args = malloc(strlen(extract($2)) + 3); 
+            sprintf(args, "(%s)", extract($2)); 
+            printf("Arguments with liste: %s\n", args);
+            $$ = add_symbol(args, 's');
+            free(args);
+        };
+
+plage : CELLULE DXPTS CELLULE {
+            char* plage = malloc(strlen(extract($1)) + strlen(extract($3)) + 2);
+            sprintf(plage, "%s:%s", extract($1), extract($3));
+            printf("Plage from %s to %s\n", extract($1), extract($3));
+            $$ = add_symbol(plage, 's');    
+            free(plage);
+        };
+
+liste : CELLULE { 
+            char* liste = strdup(extract($1));
+            printf("Single cell in liste: %s\n", liste);
+            $$ = add_symbol(liste, 's');
+            free(liste);
+        }
+        | CELLULE PV liste {
+            char* liste = malloc(strlen(extract($1)) + strlen(extract($3)) + 2);
+            sprintf(liste, "%s#%s", extract($1), extract($3));
+            printf("Liste concatenation: %s\n", liste);
+            $$ = add_symbol(liste, 's');
+            free(liste);
+        };
+
+%%
+
+int yyerror(char *msg) {
+    fprintf(stderr, "%s\n", msg);
+    return 0;
+}
+
+int main() {
+    yyparse();
+    printf("\nFin des analyses lexicale et syntaxique\n");
+
+    printf("\nTableaux :\n");
+    for (int i = 0; i < last_index; i++) {
+        printf("[%c, %d, %d, %d, %d] [%s]\n", tableau1[i][0], tableau1[i][1], tableau1[i][2], tableau1[i][3], tableau1[i][4], extract(i));
+    }
+
+    printf("\nListe des cellules et de leur contenu :\n");
+    for (int i = 0; i < last_index; i++) {
+        if (tableau1[i][0] == 'c') {
+            printf("Cellule [%s]: %s\n", extract(i), extract(tableau1[i][4]));
+        }
+    }
+
+    printf("\nCSV\n");
+    int row, col;
+    get_csv_dimensions(&row, &col);
+    printf("%d Lignes x %d Colonnes\n", row, col);
+
+    save_to_csv(row, col);
+
+    printf("\nFin du programme...[]\n\n");
+}
